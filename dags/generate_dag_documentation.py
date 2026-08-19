@@ -3,8 +3,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-import pendulum
-from airflow.decorators import dag, task
+from airflow.sdk import dag, task
+from pendulum import datetime
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -18,7 +18,7 @@ if str(SCRIPTS_DIR) not in sys.path:
     dag_id="generate_dag_documentation",
     description="Generate markdown documentation for all Airflow DAGs in this project.",
     schedule="@daily",
-    start_date=pendulum.datetime(2026, 8, 16, tz="Asia/Calcutta"),
+    start_date=datetime(2026, 8, 16, tz="Asia/Calcutta"),
     catchup=False,
     tags=["documentation", "automation"],
 )
