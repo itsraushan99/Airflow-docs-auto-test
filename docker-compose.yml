@@ -1,0 +1,12 @@
+services:
+  dag-docs:
+    build: .
+    volumes:
+      - ./Documentation:/opt/airflow/Documentation
+    command:
+      - python
+      - /opt/airflow/scripts/generate_dag_docs.py
+      - --dags-dir
+      - /opt/airflow/dags
+      - --output-dir
+      - /opt/airflow/Documentation

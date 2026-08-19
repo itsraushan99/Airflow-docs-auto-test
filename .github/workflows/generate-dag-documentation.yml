@@ -1,0 +1,112 @@
+name: Generate DAG Documentation
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  generate-documentation:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Airflow
+        run: |
+          AIRFLOW_VERSION=3.0.6
+          PYTHON_VERSION=$(python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
+          CONSTRAINT_URL="https://raw.githubusercontent.com/apache/airflow/constraints-${AIRFLOW_VERSION}/constraints-${PYTHON_VERSION}.txt"
+          python -m pip install --upgrade pip
+          pip install "apache-airflow==${AIRFLOW_VERSION}" --constraint "${CONSTRAINT_URL}"
+
+      - name: Detect changed DAG files
+        id: changed
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            # Manual trigger — regenerate all
+            CHANGED=$(find dags -name "*.py" | tr '\n' ' ')
+          else
+            CHANGED=$(git diff --name-only HEAD~1 HEAD -- 'dags/*.py' | tr '\n' ' ')
+          fi
+          echo "files=${CHANGED}" >> "$GITHUB_OUTPUT"
+          echo "Changed DAG files: ${CHANGED}"
+
+      - name: Generate documentation for changed DAGs
+        run: |
+          CHANGED="${{ steps.changed.outputs.files }}"
+          if [ -z "$CHANGED" ]; then
+            echo "No DAG files changed, skipping documentation generation."
+            exit 0
+          fi
+          mkdir -p Documentation
+          for dag_file in $CHANGED; do
+            echo "Generating docs for $dag_file"
+            python scripts/generate_dag_docs.py \
+              --dag-file "$dag_file" \
+              --output-dir Documentation
+          done
+
+      - name: Collect generated doc files for artifact
+        id: doc_files
+        run: |
+          CHANGED="${{ steps.changed.outputs.files }}"
+          DOC_PATHS=""
+          for dag_file in $CHANGED; do
+            stem=$(basename "$dag_file" .py)
+            doc="Documentation/${stem}_docs.md"
+            if [ -f "$doc" ]; then
+              DOC_PATHS="$DOC_PATHS $doc"
+            fi
+          done
+          echo "paths=${DOC_PATHS}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload documentation artifact
+        if: steps.doc_files.outputs.paths != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: dag-documentation
+          path: Documentation/
+
+      - name: Commit generated documentation
+        if: github.event_name == 'push' && steps.changed.outputs.files != ''
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          CHANGED_DOCS=""
+          for dag_file in ${{ steps.changed.outputs.files }}; do
+            stem=$(basename "$dag_file" .py)
+            doc="Documentation/${stem}_docs.md"
+            if [ -f "$doc" ]; then
+              git add "$doc"
+              CHANGED_DOCS="$CHANGED_DOCS $doc"
+            fi
+          done
+
+          if [ -z "$CHANGED_DOCS" ]; then
+            echo "No documentation files to commit."
+            exit 0
+          fi
+
+          if git diff --cached --quiet; then
+            echo "Documentation is already up to date."
+            exit 0
+          fi
+
+          git commit -m "Update DAG documentation [skip ci]"
+          git push
