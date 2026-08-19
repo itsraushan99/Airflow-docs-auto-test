@@ -19,7 +19,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 2
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -37,20 +37,50 @@ jobs:
       - name: Detect changed DAG files
         id: changed
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            # Manual trigger — regenerate all
-            CHANGED=$(find dags -name "*.py" | tr '\n' ' ')
-          else
-            CHANGED=$(git diff --name-only HEAD~1 HEAD -- 'dags/*.py' | tr '\n' ' ')
-          fi
-          echo "files=${CHANGED}" >> "$GITHUB_OUTPUT"
-          echo "Changed DAG files: ${CHANGED}"
+          ALL_DAGS=$(find dags -name "*.py" | sort | tr '\n' ' ')
 
-      - name: Generate documentation for changed DAGs
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            CHANGED="$ALL_DAGS"
+
+          elif [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE="${{ github.event.pull_request.base.sha }}"
+            CHANGED=$(git diff --name-only "$BASE"...HEAD -- 'dags/*.py' | tr '\n' ' ')
+            # If diff is empty (e.g. first PR or no prior commits), fall back to all
+            if [ -z "$(echo $CHANGED | tr -d ' ')" ]; then
+              CHANGED="$ALL_DAGS"
+            fi
+
+          else
+            # push event
+            PARENT_COUNT=$(git rev-list --count HEAD)
+            if [ "$PARENT_COUNT" -le 1 ]; then
+              # First commit — no parent to diff against, regenerate all
+              CHANGED="$ALL_DAGS"
+            else
+              CHANGED=$(git diff --name-only HEAD~1 HEAD -- 'dags/*.py' | tr '\n' ' ')
+              # If nothing changed in dags/ but docs are missing, regenerate all missing
+              MISSING=""
+              for f in $ALL_DAGS; do
+                stem=$(basename "$f" .py)
+                doc="Documentation/${stem}_docs.md"
+                if [ ! -f "$doc" ]; then
+                  MISSING="$MISSING $f"
+                fi
+              done
+              CHANGED="$CHANGED $MISSING"
+            fi
+          fi
+
+          # Deduplicate and trim
+          CHANGED=$(echo "$CHANGED" | tr ' ' '\n' | sort -u | grep -v '^$' | tr '\n' ' ')
+          echo "files=${CHANGED}" >> "$GITHUB_OUTPUT"
+          echo "Changed/missing DAG files: ${CHANGED}"
+
+      - name: Generate documentation
         run: |
           CHANGED="${{ steps.changed.outputs.files }}"
-          if [ -z "$CHANGED" ]; then
-            echo "No DAG files changed, skipping documentation generation."
+          if [ -z "$(echo $CHANGED | tr -d ' ')" ]; then
+            echo "No DAG files to process."
             exit 0
           fi
           mkdir -p Documentation
@@ -61,48 +91,20 @@ jobs:
               --output-dir Documentation
           done
 
-      - name: Collect generated doc files for artifact
-        id: doc_files
-        run: |
-          CHANGED="${{ steps.changed.outputs.files }}"
-          DOC_PATHS=""
-          for dag_file in $CHANGED; do
-            stem=$(basename "$dag_file" .py)
-            doc="Documentation/${stem}_docs.md"
-            if [ -f "$doc" ]; then
-              DOC_PATHS="$DOC_PATHS $doc"
-            fi
-          done
-          echo "paths=${DOC_PATHS}" >> "$GITHUB_OUTPUT"
-
       - name: Upload documentation artifact
-        if: steps.doc_files.outputs.paths != ''
         uses: actions/upload-artifact@v4
         with:
           name: dag-documentation
           path: Documentation/
+          if-no-files-found: ignore
 
       - name: Commit generated documentation
-        if: github.event_name == 'push' && steps.changed.outputs.files != ''
+        if: github.event_name == 'push'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          CHANGED_DOCS=""
-          for dag_file in ${{ steps.changed.outputs.files }}; do
-            stem=$(basename "$dag_file" .py)
-            doc="Documentation/${stem}_docs.md"
-            if [ -f "$doc" ]; then
-              git add "$doc"
-              CHANGED_DOCS="$CHANGED_DOCS $doc"
-            fi
-          done
-
-          if [ -z "$CHANGED_DOCS" ]; then
-            echo "No documentation files to commit."
-            exit 0
-          fi
-
+          git add Documentation/
           if git diff --cached --quiet; then
             echo "Documentation is already up to date."
             exit 0
