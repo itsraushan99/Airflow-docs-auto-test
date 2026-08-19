@@ -31,7 +31,19 @@ def generate_dag_documentation():
         generate_documentation(PROJECT_ROOT / "dags", output_dir)
         return str(output_dir)
 
-    build_documentation()
+    @task
+    def notify_completion(output_dir: str) -> None:
+        from pathlib import Path
+
+        doc_files = sorted(Path(output_dir).glob("*_docs.md"))
+        if not doc_files:
+            print("No documentation files were generated.")
+            return
+        print(f"Documentation generation complete. {len(doc_files)} file(s) written:")
+        for doc_file in doc_files:
+            print(f"  - {doc_file.name}")
+
+    notify_completion(build_documentation())
 
 
 generate_dag_documentation()
