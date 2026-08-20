@@ -1,6 +1,6 @@
 # DAG Documentation — `generate_dag_documentation`
 
-Generated at `2026-08-19T10:00:31+00:00` from `dags/generate_dag_documentation.py`.
+Generated at `2026-08-20T13:25:02+00:00` from `dags/generate_dag_documentation.py`.
 
 ## `generate_dag_documentation`
 
@@ -21,8 +21,8 @@ Generate markdown documentation for all Airflow DAGs in this project.
 
 ```mermaid
 flowchart TD
-    task_1["build_documentation<br/>_PythonDecoratedOperator"]
-    task_2["notify_completion<br/>_PythonDecoratedOperator"]
+    task_1["build_documentation<br/>@task"]
+    task_2["notify_completion<br/>@task"]
     task_1 --> task_2
 ```
 
