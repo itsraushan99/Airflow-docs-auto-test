@@ -6,7 +6,7 @@ from pathlib import Path
 from airflow.sdk import dag, task
 from pendulum import datetime
 
-
+#test comment
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS_DIR = PROJECT_ROOT / "scripts"
 
