@@ -1,46 +1,75 @@
-from airflow.sdk import dag, task
+from airflow.providers.standard.operators.bash import BashOperator
+from airflow.providers.standard.operators.empty import EmptyOperator
+from airflow.providers.standard.operators.python import BranchPythonOperator, PythonOperator
+from airflow.sdk import dag
 from pendulum import datetime
+
+
+def profile_customer_rows() -> dict:
+    rows = [
+        {"customer_id": "C001", "email": "anika@example.com", "status": "active"},
+        {"customer_id": "C002", "email": "kabir@example.com", "status": "inactive"},
+        {"customer_id": "C003", "email": "meera@example.com", "status": "active"},
+    ]
+    null_email_count = sum(1 for row in rows if not row["email"])
+    return {"row_count": len(rows), "null_email_count": null_email_count}
+
+
+def choose_quality_path(ti) -> str:
+    profile = ti.xcom_pull(task_ids="profile_customer_rows")
+    if profile["null_email_count"] > 0:
+        return "quarantine_bad_rows"
+    return "approve_dataset"
+
+
+def publish_quality_summary(ti) -> None:
+    profile = ti.xcom_pull(task_ids="profile_customer_rows")
+    print(f"Customer rows checked: {profile['row_count']}")
+    print(f"Null emails found: {profile['null_email_count']}")
 
 
 @dag(
     start_date=datetime(2026, 8, 1),
     schedule="@daily",
     catchup=False,
-    default_args={"owner": "data-quality-team", "retries": 2},
-    tags=["example", "data-quality", "daily"],
+    default_args={"owner": "data-quality", "retries": 1},
+    tags=["example", "quality", "operators"],
 )
 def daily_data_quality_checks():
-    """Run daily quality checks for a sample orders dataset profile."""
+    """Run daily data-quality checks using Python, Bash, Branch, and Empty operators."""
 
-    @task
-    def extract_dataset_profile() -> dict:
-        return {
-            "dataset": "orders_daily",
-            "row_count": 4,
-            "null_counts": {"order_id": 0, "customer_id": 0, "amount": 0},
-            "duplicate_count": 0,
-        }
+    start = EmptyOperator(task_id="start")
 
-    @task
-    def run_quality_rules(profile: dict) -> list[dict]:
-        return [
-            {"rule": "row_count_positive", "passed": profile["row_count"] > 0},
-            {"rule": "no_duplicate_orders", "passed": profile["duplicate_count"] == 0},
-            {"rule": "required_fields_present", "passed": all(count == 0 for count in profile["null_counts"].values())},
-        ]
+    profile = PythonOperator(
+        task_id="profile_customer_rows",
+        python_callable=profile_customer_rows,
+    )
 
-    @task
-    def summarize_quality_results(results: list[dict]) -> dict:
-        failed = [result for result in results if not result["passed"]]
-        return {"total_rules": len(results), "failed_rules": failed, "passed": not failed}
+    choose_path = BranchPythonOperator(
+        task_id="choose_quality_path",
+        python_callable=choose_quality_path,
+    )
 
-    @task
-    def publish_quality_summary(summary: dict) -> None:
-        if not summary["passed"]:
-            raise ValueError(f"Data quality checks failed: {summary['failed_rules']}")
-        print(f"All {summary['total_rules']} data quality rules passed.")
+    quarantine_bad_rows = BashOperator(
+        task_id="quarantine_bad_rows",
+        bash_command='echo "Quarantined bad customer records for {{ ds }}"',
+    )
 
-    publish_quality_summary(summarize_quality_results(run_quality_rules(extract_dataset_profile())))
+    approve_dataset = BashOperator(
+        task_id="approve_dataset",
+        bash_command='echo "Customer dataset approved for {{ ds }}"',
+    )
+
+    summarize = PythonOperator(
+        task_id="publish_quality_summary",
+        python_callable=publish_quality_summary,
+        trigger_rule="none_failed_min_one_success",
+    )
+
+    end = EmptyOperator(task_id="end")
+
+    start >> profile >> choose_path
+    choose_path >> [quarantine_bad_rows, approve_dataset] >> summarize >> end
 
 
 daily_data_quality_checks()
