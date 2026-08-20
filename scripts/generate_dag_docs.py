@@ -47,6 +47,24 @@ def format_task_dependencies(task: Any) -> str:
     return ", ".join(f"`{task_id}`" for task_id in downstream_task_ids)
 
 
+# Maps internal operator class names to the Airflow UI display label
+_OPERATOR_UI_LABELS: dict[str, str] = {
+    "_PythonDecoratedOperator": "@task",
+    "_BranchPythonDecoratedOperator": "@task.branch",
+    "_ShortCircuitDecoratedOperator": "@task.short_circuit",
+    "_SensorDecoratedOperator": "@task.sensor",
+    "_PythonVirtualenvDecoratedOperator": "@task.virtualenv",
+    "_BranchPythonVirtualenvDecoratedOperator": "@task.branch_virtualenv",
+    "_ExternalPythonDecoratedOperator": "@task.external_python",
+    "_BranchExternalPythonDecoratedOperator": "@task.branch_external_python",
+}
+
+
+def operator_ui_label(operator_class_name: str) -> str:
+    """Return the Airflow UI display label for an operator class name."""
+    return _OPERATOR_UI_LABELS.get(operator_class_name, operator_class_name)
+
+
 def mermaid_label(value: Any) -> str:
     text = "" if value is None else str(value)
     return text.replace("\n", "<br/>").replace("|", "&#124;").replace('"', "#quot;")
@@ -107,7 +125,7 @@ def render_task_graph(dag_info: dict[str, Any]) -> list[str]:
     lines = ["### Task Graph", "", "```mermaid", "flowchart TD"]
 
     for task in tasks:
-        label = f"{task['task_id']}<br/>{task['operator']}"
+        label = f"{task['task_id']}<br/>{operator_ui_label(task['operator'])}"
         lines.append(f"    {node_ids[task['task_id']]}[\"{mermaid_label(label)}\"]")
 
     for task in tasks:
