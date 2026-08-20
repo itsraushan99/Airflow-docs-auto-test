@@ -1,6 +1,6 @@
 # DAG Documentation — `daily_data_quality_checks`
 
-Generated at `2026-08-19T10:00:27+00:00` from `dags/daily_data_quality_checks.py`.
+Generated at `2026-08-20T12:19:51+00:00` from `dags/daily_data_quality_checks.py`.
 
 ## `daily_data_quality_checks`
 
@@ -13,28 +13,38 @@ No description provided.
 | End date | `Not set` |
 | Catchup | `False` |
 | Max active runs | `16` |
-| Owner | `data-quality-team` |
-| Tags | `daily`, `data-quality`, `example` |
-| Task count | `4` |
+| Owner | `data-quality` |
+| Tags | `example`, `operators`, `quality` |
+| Task count | `7` |
 
 ### Task Graph
 
 ```mermaid
 flowchart TD
-    task_1["extract_dataset_profile<br/>_PythonDecoratedOperator"]
-    task_2["publish_quality_summary<br/>_PythonDecoratedOperator"]
-    task_3["run_quality_rules<br/>_PythonDecoratedOperator"]
-    task_4["summarize_quality_results<br/>_PythonDecoratedOperator"]
-    task_1 --> task_3
-    task_3 --> task_4
+    task_1["approve_dataset<br/>BashOperator"]
+    task_2["choose_quality_path<br/>BranchPythonOperator"]
+    task_3["end<br/>EmptyOperator"]
+    task_4["profile_customer_rows<br/>PythonOperator"]
+    task_5["publish_quality_summary<br/>PythonOperator"]
+    task_6["quarantine_bad_rows<br/>BashOperator"]
+    task_7["start<br/>EmptyOperator"]
+    task_1 --> task_5
+    task_2 --> task_1
+    task_2 --> task_6
     task_4 --> task_2
+    task_5 --> task_3
+    task_6 --> task_5
+    task_7 --> task_4
 ```
 
 ### Tasks
 
 | Task ID | Operator | Owner | Retries | Trigger Rule | Pool | Downstream |
 | --- | --- | --- | --- | --- | --- | --- |
-| `extract_dataset_profile` | `_PythonDecoratedOperator` | `data-quality-team` | `2` | `all_success` | `default_pool` | `run_quality_rules` |
-| `publish_quality_summary` | `_PythonDecoratedOperator` | `data-quality-team` | `2` | `all_success` | `default_pool` | None |
-| `run_quality_rules` | `_PythonDecoratedOperator` | `data-quality-team` | `2` | `all_success` | `default_pool` | `summarize_quality_results` |
-| `summarize_quality_results` | `_PythonDecoratedOperator` | `data-quality-team` | `2` | `all_success` | `default_pool` | `publish_quality_summary` |
+| `approve_dataset` | `BashOperator` | `data-quality` | `1` | `all_success` | `default_pool` | `publish_quality_summary` |
+| `choose_quality_path` | `BranchPythonOperator` | `data-quality` | `1` | `all_success` | `default_pool` | `approve_dataset`, `quarantine_bad_rows` |
+| `end` | `EmptyOperator` | `data-quality` | `1` | `all_success` | `default_pool` | None |
+| `profile_customer_rows` | `PythonOperator` | `data-quality` | `1` | `all_success` | `default_pool` | `choose_quality_path` |
+| `publish_quality_summary` | `PythonOperator` | `data-quality` | `1` | `none_failed_min_one_success` | `default_pool` | `end` |
+| `quarantine_bad_rows` | `BashOperator` | `data-quality` | `1` | `all_success` | `default_pool` | `publish_quality_summary` |
+| `start` | `EmptyOperator` | `data-quality` | `1` | `all_success` | `default_pool` | `profile_customer_rows` |
